@@ -1,4 +1,4 @@
-<!-- checkpoint-id: 98e37b54-7ee4-475e-a33a-55f3d468464f -->
+<!-- checkpoint-id: ba884ff7-3c04-4d86-85ef-6747edb07ce0 -->
 # Verification Ledger
 
 Allowed statuses: `unverified`, `passed`, `failed`, `blocked`, `deferred`.
@@ -13,11 +13,11 @@ Only `passed` counts as complete. Every `passed` row requires concrete evidence.
 | AC-027 | passed | tests/supervisor-queue.test.ts proves interactive-over-background stable FIFO, exact balanced 4 full-Agent / 8 completion / 3 per-owner / 32 queued defaults, queue_full for job 33 with no attempt, full-Agent/completion/control-plane/per-owner/provider/model quotas, routed resource admission, and queued/active inherited deadlines. Fake timers clear on stop. | 2026-07-13T08:58:28.208Z |
 | AC-028 | passed | tests/worker-execution.test.ts runs the product agent-worker.mjs with a real deterministic Pi AgentSession. Two same-target attempts have distinct PIDs, nonces, attempt ids, in-memory Sessions/tool namespaces and roots; children load no extensions/skills/templates/default tools, exit before return, and create zero Session JSONL files. | 2026-07-13T09:58:18.435Z |
 | AC-029 | passed | tests/worker-execution.test.ts and tests/worker-protocol.test.ts prove V1 capability IPC round-trip and parent validation of job/attempt/lease identity, exact capability/tool, TypeBox schema, active state, deadline, call counts, pending calls and frame/payload/argument/result sizes. Unknown/revoked/schema-invalid calls fail before the closure; lifecycle events contain no private prompt. Final full check passed 17 files/100 tests. | 2026-07-13T09:58:18.435Z |
-| AC-030 | unverified | Planning target: cancellation at every phase and confirmed process-tree exit. | - |
-| AC-031 | unverified | Planning target: cleanup barrier and default Session/temp deletion before terminal outcome. | - |
-| AC-032 | unverified | Planning target: cleanup_failed, safe quarantine, degraded state, and bounded janitor. | - |
+| AC-030 | unverified | T106 worker-layer evidence passes creation/tool cancellation, cooperative cancellation, ignored-cancel Windows process-tree termination, PID/nonce ownership, and confirmed exit. End-to-end queue/routing/service cancellation remains a T107/T114 gate. | — |
+| AC-031 | unverified | T106 tests prove process exit, capability revocation, hook release, default attempt-root deletion, and cleanup_finished before result/rejection. Supervisor registry release and terminal-audit integration remain T107/T114 gates. | — |
+| AC-032 | unverified | T106 tests prove bounded deletion retry, raw-path redaction, quarantine/retention, cleanup_failed output override, degraded state, and bounded janitor recovery. Startup/manual service exposure remains a T107/T114 gate. | — |
 | AC-033 | unverified | Planning target: reload/shutdown stops admission and drains all owned work. | - |
-| AC-034 | unverified | Planning target: safe fallback starts only after prior cleanup succeeds. | - |
+| AC-034 | unverified | T106 tests prove runAttempt resolves only after cleanup_finished and a sequential next attempt cannot spawn before prior cleanup. Actual V2 route-orchestrator fallback integration remains a T107/T114 gate. | — |
 | AC-035 | unverified | Planning target: all auxiliary completions and control-plane work use supervised lifecycle. | - |
 | AC-036 | unverified | Planning target: jobs/job/tree/audit inspection API and lightweight counts. | - |
 | AC-037 | unverified | Planning target: complete terminal audit with no private payload/path leakage. | - |
@@ -47,3 +47,7 @@ Only `passed` counts as complete. Every `passed` row requires concrete evidence.
 - 2026-07-13T08:58:28.208Z: checkpoint 1e4713be-cf22-47d7-a5ad-e66c985dc32c — Completed T104's deterministic supervisor scheduling core: one encapsulated registry tracks immutable snapshots and unique jobs/attempts/leases; owner trees and bounded atomic transfer, prerequisite DAG policy, stable priority/FIFO, exact balanced queue bounds, hierarchical quotas, explicit resource assignment, terminal transitions and fake-clock deadlines are implemented and verified.
 
 - 2026-07-13T09:58:18.435Z: checkpoint 98e37b54-7ee4-475e-a33a-55f3d468464f — Completed T105's product worker layer: every attempt forks a fresh short-lived child, resolves only the selected target, creates an in-memory extension-free Pi AgentSession or isolated completion, bridges only explicit parent capabilities over bounded V1 IPC, validates identity/schema/active/deadline/size/count state at the parent, waits for normal exit, and exposes only redacted lifecycle metadata.
+
+- 2026-07-13T17:38:06.443Z: checkpoint 1d322c69-adea-4370-89e8-59af1e6abf87 — Completed T106's isolated worker cleanup layer: every success, failure, cancellation, timeout, protocol rejection, and process exit converges on one async finalizer; cooperative cancellation escalates to PID/nonce-checked Windows process-tree termination with confirmed exit; capability/listener/timer release and attempt-root cleanup settle before any result, rejection, or fallback; deletion failure withholds output as cleanup_failed and enters redacted quarantine/janitor recovery.
+
+- 2026-07-13T17:47:26.137Z: checkpoint ba884ff7-3c04-4d86-85ef-6747edb07ce0 — Finalized T106 after exact default-concurrency verification and corrected the durable authority boundary: only one local candidate commit is authorized; merge, push, paid smoke, and immediate T107 mutation remain blocked.

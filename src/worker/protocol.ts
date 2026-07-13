@@ -83,6 +83,8 @@ export interface AgentWorkerLifecycleEvent {
     | "ready"
     | "tool_call"
     | "terminal"
+    | "cancel_requested"
+    | "process_escalated"
     | "exited"
     | "cleanup_started"
     | "cleanup_finished";

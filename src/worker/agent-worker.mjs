@@ -1,6 +1,7 @@
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 const PROTOCOL_VERSION = 1;
 const TEST_PROVIDER = "pi-agent-router-test";
@@ -329,6 +330,8 @@ async function runCompletion(capsule) {
 
 async function cancel(reason) {
   if (terminalSent) return;
+  const fault = process.env.PI_AGENT_ROUTER_TEST_FAULT;
+  if (fault === "ignore-cancel" || fault === "ignore-cancel-tree") return;
   cancellationRequested = true;
   completionController?.abort(reason);
   for (const pending of pendingToolCalls.values()) pending.reject(new Error(reason));
@@ -355,8 +358,26 @@ function argumentsManifest() {
   };
 }
 
-async function runFault(fault) {
+async function runFault(fault, capsule) {
   if (!fault) return false;
+  if (fault === "hang" || fault === "ignore-cancel") {
+    await new Promise(() => undefined);
+    return true;
+  }
+  if (fault === "ignore-cancel-tree") {
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    descendant.unref();
+    const marker = join(
+      dirname(capsule.attemptRoot),
+      `descendant-${identity.attemptId.replaceAll(":", "-")}.pid`,
+    );
+    await writeFile(marker, String(descendant.pid), "utf8");
+    await new Promise(() => undefined);
+    return true;
+  }
   if (fault === "malformed") {
     await sendRaw({ protocolVersion: 1, type: "malformed", privateEcho: undefined });
     return true;
@@ -429,7 +450,7 @@ async function runFault(fault) {
 
 async function executeRun(capsule) {
   try {
-    if (await runFault(process.env.PI_AGENT_ROUTER_TEST_FAULT)) return;
+    if (await runFault(process.env.PI_AGENT_ROUTER_TEST_FAULT, capsule)) return;
     const output =
       capsule.execution.kind === "agent" ? await runAgent(capsule) : await runCompletion(capsule);
     if (cancellationRequested || terminalSent) return;

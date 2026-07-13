@@ -17,7 +17,7 @@
 ## 3. Isolated Execution and Cleanup
 
 - [x] T105 [AC-028] [AC-029] [AC-035] Implement the versioned child worker, selected-target model resolution, fresh in-memory AgentSession/completion execution, bounded IPC framing, capability-scoped proxy tools, message limits, private payload separation, and malformed/disconnect protocol tests.
-- [ ] T106 [AC-030] [AC-031] [AC-032] [AC-034] Implement single-flight finalization, cancellation races, cooperative abort/idle, process-tree escalation and exit confirmation, cleanup barrier, default-ephemeral temp roots, deletion retry, quarantine, janitor, `cleanup_failed`, and fallback-after-cleanup enforcement with real child-process fault fixtures.
+- [x] T106 [AC-030] [AC-031] [AC-032] [AC-034] Implement single-flight finalization, cancellation races, cooperative abort/idle, process-tree escalation and exit confirmation, cleanup barrier, default-ephemeral temp roots, deletion retry, quarantine, janitor, `cleanup_failed`, and fallback-after-cleanup enforcement with real child-process fault fixtures.
 - [ ] T107 [AC-023] [AC-033] [AC-036] [AC-037] Make service V2 own one supervisor; bind caller/session/connection lifecycle; implement stop-admission/drain/reload/shutdown; complete redacted events/audit; add jobs/job/tree/audit/janitor/Doctor commands, typed inspection API, and lightweight active/queued/degraded status.
 
 ## 4. Compliance Admission

@@ -40,6 +40,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function redactedReason(error: unknown, attemptRoot: string): string {
+  const raw = errorMessage(error);
+  const variants = new Set([
+    attemptRoot,
+    attemptRoot.replaceAll("\\", "/"),
+    attemptRoot.replaceAll("/", "\\"),
+  ]);
+  let redacted = raw;
+  for (const path of variants) {
+    if (path) redacted = redacted.replaceAll(path, "[router-owned-path]");
+  }
+  return redacted.slice(0, 2_000);
+}
+
 export class AttemptCleanupManager {
   readonly #config: SupervisorConfig["cleanup"];
   readonly #operations: AttemptCleanupOperations;
@@ -78,7 +92,7 @@ export class AttemptCleanupManager {
       }
     }
 
-    const reason = errorMessage(lastError).slice(0, 2_000);
+    const reason = redactedReason(lastError, attemptRoot);
     const quarantineRoot = join(dirname(attemptRoot), this.#quarantineRootName);
     const quarantinePath = join(quarantineRoot, `${Date.now()}-${randomUUID()}`);
     let quarantined = false;
@@ -102,6 +116,26 @@ export class AttemptCleanupManager {
       attempts: this.#config.deleteMaxAttempts,
       retained: false,
       quarantined,
+      pathHash,
+      reason,
+    };
+  }
+
+  retainForJanitor(attemptRoot: string, failure: unknown): AttemptCleanupOutcome {
+    const pathHash = hashPath(attemptRoot);
+    const reason = redactedReason(failure, attemptRoot);
+    this.#quarantine.set(pathHash, {
+      path: attemptRoot,
+      pathHash,
+      addedAt: Date.now(),
+      reason,
+    });
+    this.#degradedReasons.add(`cleanup:${pathHash}:${reason}`);
+    return {
+      ok: false,
+      attempts: 0,
+      retained: false,
+      quarantined: false,
       pathHash,
       reason,
     };

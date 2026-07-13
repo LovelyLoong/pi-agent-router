@@ -1,7 +1,9 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createStarterSupervisorConfig } from "../src/config/index.js";
+import { AttemptCleanupManager } from "../src/worker/cleanup.js";
 import {
   type AgentWorkerAttemptRequest,
   type AgentWorkerAttemptResult,
@@ -17,12 +19,8 @@ async function temporaryDirectory(): Promise<string> {
   return path;
 }
 
-async function jsonlFiles(path: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(path, { recursive: true, withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".jsonl")) found.push(entry.name);
-  }
-  return found;
+async function expectPathMissing(path: string): Promise<void> {
+  await expect(access(path)).rejects.toMatchObject({ code: "ENOENT" });
 }
 
 afterEach(async () => {
@@ -34,6 +32,8 @@ afterEach(async () => {
 function deterministicClient(): AgentWorkerClient {
   return new AgentWorkerClient({
     environment: { PI_AGENT_ROUTER_TEST_MODE: "deterministic" },
+    cooperativeAbortGraceMs: 500,
+    processExitGraceMs: 2_000,
   });
 }
 
@@ -45,6 +45,7 @@ function expectAgentResult(
     identity: request.identity,
     status: "succeeded",
     result: "WORKER_AGENT_OK",
+    cleanup: { ok: true, retained: false, quarantined: false },
     stderr: "",
   });
   expect(result.usage).toMatchObject({ input: 2, output: 2, totalTokens: 4 });
@@ -62,6 +63,8 @@ function expectAgentLifecycle(
     expect.objectContaining({ type: "tool_call", toolName: "proxy_echo" }),
     expect.objectContaining({ type: "terminal", status: "succeeded" }),
     expect.objectContaining({ type: "exited", processId: result.processId }),
+    expect.objectContaining({ type: "cleanup_started" }),
+    expect.objectContaining({ type: "cleanup_finished", status: "succeeded" }),
   ]);
   expect(JSON.stringify(events)).not.toContain("PRIVATE_WORKER_SENTINEL");
 }
@@ -81,8 +84,8 @@ describe("isolated Pi Agent worker", () => {
     expectAgentResult(result, request);
     expectAgentLifecycle(events, request, result);
     expect(observed).toEqual([{ value: "hello" }]);
-    expect(await jsonlFiles(request.capsule.attemptRoot)).toEqual([]);
-  });
+    await expectPathMissing(request.capsule.attemptRoot);
+  }, 20_000);
 });
 
 describe("isolated Pi Agent attempt freshness", () => {
@@ -95,9 +98,178 @@ describe("isolated Pi Agent attempt freshness", () => {
     expect(first.processId).not.toBe(second.processId);
     expect(first.workerNonce).not.toBe(second.workerNonce);
     expect(first.identity.attemptId).not.toBe(second.identity.attemptId);
+    expect(first.cleanup.ok).toBe(true);
+    expect(second.cleanup.ok).toBe(true);
     expect(isProcessAlive(first.processId)).toBe(false);
     expect(isProcessAlive(second.processId)).toBe(false);
-  });
+  }, 20_000);
+});
+
+describe("isolated worker cancellation and cleanup barrier", () => {
+  it("settles a cancellation racing with process creation through one cleanup barrier", async () => {
+    const root = await temporaryDirectory();
+    const controller = new AbortController();
+    controller.abort("cancel-before-ready");
+    const request = await workerRequest(root, { suffix: "creation-race" });
+    request.signal = controller.signal;
+    const events: Array<{ type: string }> = [];
+    request.onLifecycleEvent = (event) => events.push(event);
+    const client = new AgentWorkerClient({
+      environment: {
+        PI_AGENT_ROUTER_TEST_MODE: "deterministic",
+        PI_AGENT_ROUTER_TEST_FAULT: "hang",
+      },
+      cooperativeAbortGraceMs: 100,
+      processExitGraceMs: 2_000,
+    });
+
+    const result = await client.runAttempt(request);
+
+    expect(result).toMatchObject({ status: "cancelled", cleanup: { ok: true } });
+    expect(events.filter((event) => event.type === "cancel_requested")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "cleanup_started")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "cleanup_finished")).toHaveLength(1);
+    expect(isProcessAlive(result.processId)).toBe(false);
+    await expectPathMissing(request.capsule.attemptRoot);
+  }, 20_000);
+
+  it("revokes a pending parent capability before cooperative worker cancellation settles", async () => {
+    const root = await temporaryDirectory();
+    const controller = new AbortController();
+    const capability = echoCapability();
+    capability.invoke = async (_argumentsValue, signal) =>
+      new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    const request = await workerRequest(root, {
+      suffix: "tool-cancel",
+      capabilities: [capability],
+    });
+    request.signal = controller.signal;
+    const events: Array<{ type: string }> = [];
+    request.onLifecycleEvent = (event) => {
+      events.push(event);
+      if (event.type === "tool_call") setTimeout(() => controller.abort("tool-cancel"), 0);
+    };
+
+    const result = await deterministicClient().runAttempt(request);
+
+    expect(result).toMatchObject({ status: "cancelled", cleanup: { ok: true } });
+    expect(events.some((event) => event.type === "tool_call")).toBe(true);
+    expect(events.filter((event) => event.type === "cleanup_finished")).toHaveLength(1);
+    expect(isProcessAlive(result.processId)).toBe(false);
+    await expectPathMissing(request.capsule.attemptRoot);
+  }, 20_000);
+
+  it.skipIf(process.platform !== "win32")(
+    "force-terminates an owned ignored-cancel process tree and confirms descendant exit",
+    async () => {
+      const root = await temporaryDirectory();
+      const controller = new AbortController();
+      const request = await workerRequest(root, { suffix: "tree" });
+      request.signal = controller.signal;
+      const events: Array<{ type: string }> = [];
+      request.onLifecycleEvent = (event) => {
+        events.push(event);
+        if (event.type === "ready") setTimeout(() => controller.abort("force-tree"), 0);
+      };
+      const client = new AgentWorkerClient({
+        environment: {
+          PI_AGENT_ROUTER_TEST_MODE: "deterministic",
+          PI_AGENT_ROUTER_TEST_FAULT: "ignore-cancel-tree",
+        },
+        cooperativeAbortGraceMs: 100,
+        processExitGraceMs: 2_000,
+      });
+
+      const result = await client.runAttempt(request);
+      const descendantProcessId = Number(
+        await readFile(join(root, "descendant-attempt-tree.pid"), "utf8"),
+      );
+
+      expect(result).toMatchObject({ status: "cancelled", cleanup: { ok: true } });
+      expect(events.filter((event) => event.type === "process_escalated")).toHaveLength(1);
+      expect(isProcessAlive(result.processId)).toBe(false);
+      expect(isProcessAlive(descendantProcessId)).toBe(false);
+      await expectPathMissing(request.capsule.attemptRoot);
+    },
+    20_000,
+  );
+
+  it("overrides successful output with cleanup_failed and exposes bounded janitor recovery", async () => {
+    const root = await temporaryDirectory();
+    const request = await workerRequest(root, { suffix: "cleanup-failure" });
+    let janitorMayRemove = false;
+    const cleanupConfig = {
+      ...createStarterSupervisorConfig().cleanup,
+      deleteMaxAttempts: 1,
+    };
+    const cleanupManager = new AttemptCleanupManager(cleanupConfig, {
+      operations: {
+        async remove(path) {
+          if (!janitorMayRemove) throw new Error(`locked Router path ${path}`);
+          await rm(path, { recursive: true, force: true });
+        },
+        async rename() {
+          throw new Error("rename blocked by Windows lock");
+        },
+        async wait() {},
+      },
+    });
+    const client = new AgentWorkerClient({
+      environment: { PI_AGENT_ROUTER_TEST_MODE: "deterministic" },
+      cooperativeAbortGraceMs: 500,
+      processExitGraceMs: 2_000,
+      cleanupManager,
+    });
+
+    const result = await client.runAttempt(request);
+
+    expect(result).toMatchObject({
+      status: "cleanup_failed",
+      failure: { code: "cleanup_failed" },
+      cleanup: { ok: false, quarantined: false },
+    });
+    expect(result.result).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain(request.capsule.attemptRoot);
+    expect(JSON.stringify(cleanupManager.status())).not.toContain(request.capsule.attemptRoot);
+    expect(cleanupManager.status()).toMatchObject({ degraded: true, quarantineCount: 1 });
+    expect(isProcessAlive(result.processId)).toBe(false);
+
+    janitorMayRemove = true;
+    await expect(cleanupManager.runJanitor()).resolves.toEqual({
+      attempted: 1,
+      removed: 1,
+      remaining: 0,
+    });
+    expect(cleanupManager.status().degraded).toBe(false);
+    await expectPathMissing(request.capsule.attemptRoot);
+  }, 20_000);
+
+  it("publishes cleanup completion before a caller can start the next fallback attempt", async () => {
+    const root = await temporaryDirectory();
+    const order: string[] = [];
+    const first = await workerRequest(root, { suffix: "fallback-first" });
+    const second = await workerRequest(root, { suffix: "fallback-second" });
+    first.onLifecycleEvent = (event) => {
+      if (event.type === "cleanup_finished") order.push("first:cleanup_finished");
+    };
+    second.onLifecycleEvent = (event) => {
+      if (event.type === "spawned") order.push("second:spawned");
+    };
+    const client = deterministicClient();
+
+    const firstResult = await client.runAttempt(first);
+    const secondResult = await client.runAttempt(second);
+
+    expect(firstResult.cleanup.ok).toBe(true);
+    expect(secondResult.cleanup.ok).toBe(true);
+    expect(order).toEqual(["first:cleanup_finished", "second:spawned"]);
+  }, 30_000);
 });
 
 describe("isolated Pi completion worker", () => {
@@ -124,10 +296,15 @@ describe("isolated Pi completion worker", () => {
 
     const result = await deterministicClient().runAttempt(request);
 
-    expect(result).toMatchObject({ status: "succeeded", result: "WORKER_COMPLETION_OK" });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      result: "WORKER_COMPLETION_OK",
+      cleanup: { ok: true },
+    });
     expect(JSON.stringify(events)).not.toContain("PRIVATE_COMPLETION_SENTINEL");
     expect(isProcessAlive(result.processId)).toBe(false);
-  });
+    await expectPathMissing(request.capsule.attemptRoot);
+  }, 20_000);
 
   it("fails closed when the already-selected model is not registered", async () => {
     const root = await temporaryDirectory();
@@ -148,7 +325,9 @@ describe("isolated Pi completion worker", () => {
     expect(result).toMatchObject({
       status: "failed",
       failure: { code: "model_unavailable" },
+      cleanup: { ok: true },
     });
     expect(isProcessAlive(result.processId)).toBe(false);
-  });
+    await expectPathMissing(request.capsule.attemptRoot);
+  }, 20_000);
 });

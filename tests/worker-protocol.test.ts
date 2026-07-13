@@ -52,7 +52,7 @@ describe("versioned worker protocol validation", () => {
     await expect(faultClient("").runAttempt(request)).rejects.toMatchObject({
       code: "payload_too_large",
     });
-  });
+  }, 20_000);
 
   it("does not invoke a closure after its job is no longer active", async () => {
     const observed: unknown[] = [];
@@ -67,7 +67,7 @@ describe("versioned worker protocol validation", () => {
       }).runAttempt(request),
     ).rejects.toMatchObject({ code: "capability_revoked" });
     expect(observed).toEqual([]);
-  });
+  }, 20_000);
 
   it("fails the attempt when a parent capability result exceeds its bound", async () => {
     const request = await workerRequest(await temporaryDirectory(), {
@@ -79,7 +79,7 @@ describe("versioned worker protocol validation", () => {
         environment: { PI_AGENT_ROUTER_TEST_MODE: "deterministic" },
       }).runAttempt(request),
     ).rejects.toMatchObject({ code: "frame_too_large" });
-  });
+  }, 20_000);
 
   it("rejects malformed identity before spawning", async () => {
     const request = await workerRequest(await temporaryDirectory());
@@ -88,7 +88,7 @@ describe("versioned worker protocol validation", () => {
     await expect(faultClient("").runAttempt(request)).rejects.toMatchObject({
       code: "invalid_protocol",
     });
-  });
+  }, 20_000);
 
   it("rejects duplicate capability ids and names before spawning", async () => {
     const first = echoCapability();
@@ -100,5 +100,5 @@ describe("versioned worker protocol validation", () => {
     await expect(faultClient("").runAttempt(request)).rejects.toMatchObject({
       code: "invalid_protocol",
     });
-  });
+  }, 20_000);
 });

@@ -4,8 +4,12 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { createStarterSupervisorConfig } from "../config/starter.js";
 import type { AgentJobCapability } from "../contracts/jobs.js";
-import { AttemptCleanupManager } from "./cleanup.js";
-import { terminateOwnedProcessTree } from "./process-tree.js";
+import { AttemptCleanupManager, type AttemptCleanupOutcome } from "./cleanup.js";
+import {
+  terminateOwnedProcessTree,
+  waitForOwnedProcessExit,
+  workerProcessHasExited,
+} from "./process-tree.js";
 import {
   AGENT_WORKER_PROTOCOL_VERSION,
   type AgentWorkerAttemptRequest,
@@ -65,6 +69,11 @@ interface WorkerProcessOptions {
   cooperativeAbortGraceMs: number;
   processExitGraceMs: number;
   cleanupManager: AttemptCleanupManager;
+}
+
+interface ExitConfirmation {
+  confirmed: boolean;
+  failure?: unknown;
 }
 
 function capabilityManifests(
@@ -179,18 +188,18 @@ function capabilityArgumentsMatch(
 
 function workerEnvironment(overrides: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
   const environment = { ...process.env };
-  delete environment.PI_AGENT_ROUTER_TEST_MODE;
-  delete environment.PI_AGENT_ROUTER_TEST_FAULT;
+  Reflect.deleteProperty(environment, "PI_AGENT_ROUTER_TEST_MODE");
+  Reflect.deleteProperty(environment, "PI_AGENT_ROUTER_TEST_FAULT");
   return { ...environment, ...overrides };
 }
 
-function asProtocolError(error: unknown, fallback: "invalid_protocol" | "worker_disconnected") {
-  return error instanceof AgentWorkerProtocolError
-    ? error
-    : new AgentWorkerProtocolError(
-        fallback,
-        error instanceof Error ? error.message : String(error),
-      );
+function asProtocolError(
+  error: unknown,
+  fallback: "invalid_protocol" | "worker_disconnected",
+): AgentWorkerProtocolError {
+  if (error instanceof AgentWorkerProtocolError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new AgentWorkerProtocolError(fallback, message);
 }
 
 class WorkerAttemptController {
@@ -198,12 +207,15 @@ class WorkerAttemptController {
   readonly #options: WorkerProcessOptions;
   readonly #capabilityController = new AbortController();
   readonly #state: WorkerState = { toolCalls: 0, pendingToolCalls: 0, stderr: "" };
-  #child!: ChildProcess;
-  #startupTimer!: ReturnType<typeof setTimeout>;
+  #child: ChildProcess | undefined;
+  #startupTimer: ReturnType<typeof setTimeout> | undefined;
   #resolve!: (value: AgentWorkerAttemptResult) => void;
   #reject!: (reason: unknown) => void;
+  #resultPromise: Promise<AgentWorkerAttemptResult> | undefined;
+  #finalizePromise: Promise<void> | undefined;
   #settled = false;
-  #pendingCancelReason: string | undefined;
+  #exitObserved = false;
+  #callerCancelled = false;
 
   constructor(prepared: PreparedAttempt, options: WorkerProcessOptions) {
     this.#prepared = prepared;
@@ -211,37 +223,53 @@ class WorkerAttemptController {
   }
 
   run(): Promise<AgentWorkerAttemptResult> {
-    const { request } = this.#prepared;
-    this.#child = fork(this.#options.workerPath, [], {
-      cwd: request.capsule.attemptRoot,
-      env: workerEnvironment(this.#options.environment),
-      stdio: ["ignore", "ignore", "pipe", "ipc"],
-      serialization: "json",
-    });
-    this.#emit("spawned", this.#child.pid ? { processId: this.#child.pid } : {});
-    this.#wireProcess();
-    this.#startupTimer = setTimeout(() => this.#failStartTimeout(), this.#options.startupTimeoutMs);
-    this.#startupTimer.unref?.();
-    request.signal?.addEventListener("abort", this.#abort, { once: true });
-    if (request.signal?.aborted) this.#abort();
-    return new Promise<AgentWorkerAttemptResult>((resolve, reject) => {
+    if (this.#resultPromise) return this.#resultPromise;
+    const resultPromise = new Promise<AgentWorkerAttemptResult>((resolve, reject) => {
       this.#resolve = resolve;
       this.#reject = reject;
     });
+    this.#resultPromise = resultPromise;
+
+    const { request } = this.#prepared;
+    try {
+      this.#child = fork(this.#options.workerPath, [], {
+        cwd: request.capsule.attemptRoot,
+        env: workerEnvironment(this.#options.environment),
+        stdio: ["ignore", "ignore", "pipe", "ipc"],
+        serialization: "json",
+      });
+      this.#emit("spawned", this.#child.pid ? { processId: this.#child.pid } : {});
+      this.#wireProcess();
+      this.#startupTimer = setTimeout(
+        () => this.#failStartTimeout(),
+        this.#options.startupTimeoutMs,
+      );
+      this.#startupTimer.unref?.();
+      request.signal?.addEventListener("abort", this.#abort, { once: true });
+      if (request.signal?.aborted) this.#abort();
+    } catch (error) {
+      this.#fail(asProtocolError(error, "worker_disconnected"));
+    }
+    return resultPromise;
   }
 
   #wireProcess(): void {
-    this.#child.stderr?.on("data", (chunk) => {
+    const child = this.#child;
+    if (!child) return;
+    child.stderr?.on("data", (chunk) => {
       this.#state.stderr = boundedAppend(this.#state.stderr, chunk, this.#options.stderrLimitBytes);
     });
-    this.#child.on("message", (value: unknown) => this.#handleMessage(value));
-    this.#child.once("error", (error) => {
+    child.on("message", (value: unknown) => this.#handleMessage(value));
+    child.once("error", (error) => {
       this.#fail(new AgentWorkerProtocolError("worker_disconnected", error.message));
+      if (!child.pid) this.#observeExit();
     });
-    this.#child.once("exit", () => this.#handleExit());
+    child.once("exit", () => this.#observeExit());
+    child.once("close", () => this.#observeExit());
   }
 
   #handleMessage(value: unknown): void {
+    if (this.#settled) return;
     try {
       assertFrameSize(value, this.#prepared.request.capsule.limits.maxFrameBytes, "worker frame");
       if (isWorkerHelloFrame(value)) {
@@ -266,14 +294,15 @@ class WorkerAttemptController {
   }
 
   #handleHello(frame: WorkerHello): void {
-    if (this.#state.hello || frame.processId !== this.#child.pid) {
+    const child = this.#child;
+    if (!child || this.#state.hello || frame.processId !== child.pid) {
       throw new AgentWorkerProtocolError("invalid_protocol", "Invalid worker hello frame.");
     }
     this.#state.hello = frame;
-    clearTimeout(this.#startupTimer);
+    this.#clearStartupTimer();
     this.#emit("ready", { processId: frame.processId });
     sendFrame(
-      this.#child,
+      child,
       {
         protocolVersion: 1,
         type: "worker.run",
@@ -283,11 +312,16 @@ class WorkerAttemptController {
       },
       this.#prepared.request.capsule.limits.maxFrameBytes,
     );
-    if (this.#pendingCancelReason !== undefined) this.#sendCancel();
+    if (this.#callerCancelled) {
+      this.#sendCancel("caller-aborted");
+    } else if (this.#state.failure) {
+      this.#sendCancel(`worker-failure:${this.#state.failure.code}`);
+    }
   }
 
   #handleToolCall(frame: WorkerToolCall): void {
     this.#assertFrameIdentity(frame);
+    if (this.#finalizePromise) return;
     const capability = this.#prepared.capabilities.get(frame.capabilityId);
     if (!capability || capability.toolName !== frame.toolName) {
       throw new AgentWorkerProtocolError(
@@ -324,7 +358,7 @@ class WorkerAttemptController {
   async #invokeCapability(frame: WorkerToolCall, capability: AgentJobCapability): Promise<void> {
     try {
       const result = await capability.invoke(frame.arguments, this.#capabilityController.signal);
-      if (this.#state.failure || this.#settled) return;
+      if (this.#state.failure || this.#settled || this.#finalizePromise) return;
       assertFrameSize(
         result,
         this.#prepared.request.capsule.limits.maxToolResultBytes,
@@ -332,7 +366,7 @@ class WorkerAttemptController {
       );
       this.#sendToolResult(frame, { ok: true, result });
     } catch (error) {
-      if (this.#state.failure || this.#settled) return;
+      if (this.#state.failure || this.#settled || this.#finalizePromise) return;
       if (error instanceof AgentWorkerProtocolError) {
         this.#fail(error);
         return;
@@ -342,7 +376,7 @@ class WorkerAttemptController {
         error: (error instanceof Error ? error.message : String(error)).slice(0, 2_000),
       });
     } finally {
-      this.#state.pendingToolCalls -= 1;
+      this.#state.pendingToolCalls = Math.max(0, this.#state.pendingToolCalls - 1);
     }
   }
 
@@ -350,9 +384,11 @@ class WorkerAttemptController {
     frame: WorkerToolCall,
     outcome: { ok: true; result: unknown } | { ok: false; error: string },
   ): void {
+    const child = this.#child;
+    if (!child || this.#finalizePromise) return;
     try {
       sendFrame(
-        this.#child,
+        child,
         {
           protocolVersion: 1,
           type: "tool.result",
@@ -375,6 +411,7 @@ class WorkerAttemptController {
     }
     this.#state.terminal = frame;
     this.#emit("terminal", { status: frame.status });
+    void this.#finalize();
   }
 
   #assertFrameIdentity(frame: WorkerToolCall | WorkerTerminal): void {
@@ -388,22 +425,27 @@ class WorkerAttemptController {
   }
 
   #abort = (): void => {
-    this.#pendingCancelReason = String(this.#prepared.request.signal?.reason ?? "caller-aborted");
-    if (this.#state.hello) this.#sendCancel();
+    if (this.#settled || this.#callerCancelled) return;
+    this.#callerCancelled = true;
+    this.#capabilityController.abort("caller-aborted");
+    this.#emit("cancel_requested");
+    if (this.#state.hello) this.#sendCancel("caller-aborted");
+    void this.#finalize();
   };
 
-  #sendCancel(): void {
+  #sendCancel(reason: string): void {
+    const child = this.#child;
     const hello = this.#state.hello;
-    if (!hello) return;
+    if (!child || !hello || workerProcessHasExited(child)) return;
     try {
       sendFrame(
-        this.#child,
+        child,
         {
           protocolVersion: 1,
           type: "worker.cancel",
           nonce: hello.nonce,
           ...this.#prepared.request.identity,
-          reason: this.#pendingCancelReason ?? "caller-aborted",
+          reason,
         },
         this.#prepared.request.capsule.limits.maxFrameBytes,
       );
@@ -425,32 +467,192 @@ class WorkerAttemptController {
     if (this.#settled || this.#state.failure) return;
     this.#state.failure = error;
     this.#capabilityController.abort(error);
-    if (this.#child.connected) this.#child.disconnect();
-    this.#child.kill();
+    if (this.#state.hello) this.#sendCancel(`worker-failure:${error.code}`);
+    void this.#finalize();
   }
 
-  #handleExit(): void {
-    if (this.#settled) return;
-    this.#settled = true;
-    this.#cleanup();
-    this.#emit("exited", this.#child.pid ? { processId: this.#child.pid } : {});
-    if (this.#state.failure) {
-      this.#reject(this.#state.failure);
+  #observeExit(): void {
+    if (this.#exitObserved) return;
+    this.#exitObserved = true;
+    this.#clearStartupTimer();
+    const processId = this.#child?.pid;
+    this.#emit("exited", processId ? { processId } : {});
+    void this.#finalize();
+  }
+
+  #finalize(): Promise<void> {
+    if (!this.#finalizePromise) {
+      this.#finalizePromise = this.#finalizeOnce().catch((error) => {
+        this.#releaseRuntimeHooks();
+        if (this.#settled) return;
+        this.#settled = true;
+        this.#reject(asProtocolError(error, "worker_disconnected"));
+      });
+    }
+    return this.#finalizePromise;
+  }
+
+  async #finalizeOnce(): Promise<void> {
+    this.#clearStartupTimer();
+    this.#capabilityController.abort(this.#finalizationAbortReason());
+
+    const exit = await this.#confirmProcessExit();
+    this.#recordMissingTerminal(exit.confirmed);
+    this.#emit("cleanup_started");
+    const cleanup = await this.#cleanupAttempt(exit);
+    this.#emit("cleanup_finished", { status: this.#cleanupLifecycleStatus(cleanup) });
+    this.#releaseRuntimeHooks();
+    this.#settle(cleanup);
+  }
+
+  #finalizationAbortReason(): unknown {
+    if (this.#callerCancelled) return "caller-aborted";
+    return this.#state.failure ?? "worker-finished";
+  }
+
+  #exitGrace(): number {
+    if (this.#callerCancelled || this.#state.failure) {
+      return this.#options.cooperativeAbortGraceMs;
+    }
+    return this.#options.processExitGraceMs;
+  }
+
+  async #confirmProcessExit(): Promise<ExitConfirmation> {
+    const child = this.#child;
+    if (!child) return { confirmed: true };
+    if (this.#exitObserved || workerProcessHasExited(child)) {
+      if (!this.#exitObserved) this.#observeExit();
+      return { confirmed: true };
+    }
+    if (await waitForOwnedProcessExit(child, this.#exitGrace())) {
+      if (!this.#exitObserved) this.#observeExit();
+      return { confirmed: true };
+    }
+    return this.#escalateProcessExit(child);
+  }
+
+  async #escalateProcessExit(child: ChildProcess): Promise<ExitConfirmation> {
+    this.#emit("process_escalated", child.pid ? { processId: child.pid } : {});
+    let failure: unknown;
+    try {
+      await terminateOwnedProcessTree(child, this.#state.hello);
+    } catch (error) {
+      failure = error;
+    }
+    const confirmed = await waitForOwnedProcessExit(child, this.#options.processExitGraceMs);
+    if (confirmed && !this.#exitObserved) this.#observeExit();
+    return { confirmed, ...(failure === undefined ? {} : { failure }) };
+  }
+
+  #recordMissingTerminal(exitConfirmed: boolean): void {
+    if (!exitConfirmed || this.#callerCancelled || this.#state.failure || this.#state.terminal) {
       return;
     }
-    if (!this.#state.hello || !this.#state.terminal) {
-      this.#reject(
+    this.#state.failure = new AgentWorkerProtocolError(
+      "worker_disconnected",
+      `Worker exited without a terminal frame. stderr=${this.#state.stderr.slice(0, 2_000)}`,
+    );
+  }
+
+  async #cleanupAttempt(exit: ExitConfirmation): Promise<AttemptCleanupOutcome> {
+    const attemptRoot = this.#prepared.request.capsule.attemptRoot;
+    if (!exit.confirmed) {
+      return this.#options.cleanupManager.retainForJanitor(
+        attemptRoot,
+        exit.failure ?? "Worker process exit was not confirmed after escalation.",
+      );
+    }
+    try {
+      return await this.#options.cleanupManager.cleanup(
+        attemptRoot,
+        this.#prepared.request.retention,
+      );
+    } catch (error) {
+      return this.#options.cleanupManager.retainForJanitor(attemptRoot, error);
+    }
+  }
+
+  #cleanupLifecycleStatus(cleanup: AttemptCleanupOutcome): AgentWorkerLifecycleEvent["status"] {
+    if (!cleanup.ok) return "cleanup_failed";
+    if (this.#callerCancelled) return "cancelled";
+    return this.#state.terminal?.status ?? "failed";
+  }
+
+  #settle(cleanup: AttemptCleanupOutcome): void {
+    if (this.#settled) return;
+    this.#settled = true;
+    if (!cleanup.ok) {
+      this.#resolve(this.#cleanupFailureResult(cleanup));
+      return;
+    }
+    if (this.#callerCancelled) {
+      this.#resolve(this.#cancelledResult(cleanup));
+      return;
+    }
+    if (this.#state.failure) {
+      this.#rejectWithCleanup(this.#state.failure, cleanup);
+      return;
+    }
+    if (!this.#state.hello) {
+      this.#rejectWithCleanup(
         new AgentWorkerProtocolError(
           "worker_disconnected",
-          `Worker exited without a terminal frame. stderr=${this.#state.stderr.slice(0, 2_000)}`,
+          "Worker completed cleanup without a validated hello frame.",
         ),
+        cleanup,
       );
       return;
     }
-    this.#resolve(this.#result(this.#state.hello, this.#state.terminal));
+    if (!this.#state.terminal) {
+      this.#rejectWithCleanup(
+        new AgentWorkerProtocolError(
+          "worker_disconnected",
+          "Worker completed cleanup without a terminal frame.",
+        ),
+        cleanup,
+      );
+      return;
+    }
+    this.#resolve(this.#result(this.#state.hello, this.#state.terminal, cleanup));
   }
 
-  #result(hello: WorkerHello, terminal: WorkerTerminal): AgentWorkerAttemptResult {
+  #cleanupFailureResult(cleanup: AttemptCleanupOutcome): AgentWorkerAttemptResult {
+    const message = cleanup.reason ?? "Worker cleanup failed.";
+    return {
+      identity: { ...this.#prepared.request.identity },
+      processId: this.#state.hello?.processId ?? Number(this.#child?.pid ?? 0),
+      workerNonce: this.#state.hello?.nonce ?? "unconfirmed-worker",
+      status: "cleanup_failed",
+      failure: { code: "cleanup_failed", message },
+      cleanup,
+      stderr: this.#state.stderr,
+    };
+  }
+
+  #cancelledResult(cleanup: AttemptCleanupOutcome): AgentWorkerAttemptResult {
+    return {
+      identity: { ...this.#prepared.request.identity },
+      processId: this.#state.hello?.processId ?? Number(this.#child?.pid ?? 0),
+      workerNonce: this.#state.hello?.nonce ?? "worker-not-ready",
+      status: "cancelled",
+      failure: {
+        code: "execution_failed",
+        message: "Caller cancelled the worker attempt.",
+      },
+      cleanup,
+      stderr: this.#state.stderr,
+    };
+  }
+
+  #rejectWithCleanup(error: AgentWorkerProtocolError, cleanup: AttemptCleanupOutcome): void {
+    this.#reject(Object.assign(error, { cleanup }));
+  }
+
+  #result(
+    hello: WorkerHello,
+    terminal: WorkerTerminal,
+    cleanup: AttemptCleanupOutcome,
+  ): AgentWorkerAttemptResult {
     return {
       identity: { ...this.#prepared.request.identity },
       processId: hello.processId,
@@ -459,21 +661,41 @@ class WorkerAttemptController {
       ...(terminal.result !== undefined ? { result: terminal.result } : {}),
       ...(terminal.usage ? { usage: terminal.usage } : {}),
       ...(terminal.failure ? { failure: terminal.failure } : {}),
+      cleanup,
       stderr: this.#state.stderr,
     };
   }
 
-  #cleanup(): void {
+  #clearStartupTimer(): void {
+    if (!this.#startupTimer) return;
     clearTimeout(this.#startupTimer);
+    this.#startupTimer = undefined;
+  }
+
+  #releaseRuntimeHooks(): void {
+    this.#clearStartupTimer();
     this.#prepared.request.signal?.removeEventListener("abort", this.#abort);
     this.#capabilityController.abort("worker-finished");
+    if (this.#child?.connected && workerProcessHasExited(this.#child)) {
+      try {
+        this.#child.disconnect();
+      } catch {
+        // Process exit and cleanup are already authoritative.
+      }
+    }
   }
 
   #emit(
     type: AgentWorkerLifecycleEvent["type"],
     extra: Partial<AgentWorkerLifecycleEvent> = {},
   ): void {
-    this.#prepared.request.onLifecycleEvent?.(lifecycleEvent(this.#prepared.request, type, extra));
+    try {
+      this.#prepared.request.onLifecycleEvent?.(
+        lifecycleEvent(this.#prepared.request, type, extra),
+      );
+    } catch {
+      // Consumer observability must never bypass worker cleanup.
+    }
   }
 }
 
@@ -481,16 +703,26 @@ export class AgentWorkerClient {
   readonly #options: WorkerProcessOptions;
 
   constructor(options: AgentWorkerClientOptions = {}) {
+    const defaults = createStarterSupervisorConfig();
     this.#options = {
       workerPath:
         options.workerPath ?? fileURLToPath(new URL("./agent-worker.mjs", import.meta.url)),
       environment: options.environment ?? {},
       startupTimeoutMs: Math.max(1, options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS),
       stderrLimitBytes: Math.max(1_024, options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT_BYTES),
+      cooperativeAbortGraceMs: Math.max(
+        1,
+        options.cooperativeAbortGraceMs ?? defaults.deadlines.cooperativeAbortGraceMs,
+      ),
+      processExitGraceMs: Math.max(
+        1,
+        options.processExitGraceMs ?? defaults.deadlines.processExitGraceMs,
+      ),
+      cleanupManager: options.cleanupManager ?? new AttemptCleanupManager(defaults.cleanup),
     };
   }
 
   async runAttempt(request: AgentWorkerAttemptRequest): Promise<AgentWorkerAttemptResult> {
-    return await new WorkerAttemptController(prepareAttempt(request), this.#options).run();
+    return new WorkerAttemptController(prepareAttempt(request), this.#options).run();
   }
 }
