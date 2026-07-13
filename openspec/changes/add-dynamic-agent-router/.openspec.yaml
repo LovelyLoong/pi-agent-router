@@ -1,0 +1,5 @@
+schema: pi-repo-workflow
+created: 2026-07-12
+goal: Route internal Agent tasks through user-approved executors, models, and
+  thinking levels with auditable selection, bounded fallback, and future
+  feedback integration.

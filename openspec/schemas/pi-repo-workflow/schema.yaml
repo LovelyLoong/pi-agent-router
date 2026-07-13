@@ -1,0 +1,81 @@
+name: pi-repo-workflow
+version: 1
+description: Repository-native workflow with durable handoff and evidence-backed verification
+
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Intent, scope, non-goals, and impact
+    template: proposal.md
+    instruction: |
+      Capture WHY the change exists and establish its boundaries.
+      Preserve the normalized user request, scope, non-goals, affected areas,
+      compatibility constraints, and risks. Keep implementation details out.
+    requires: []
+
+  - id: specs
+    generates: specs/**/*.md
+    description: Observable requirements and acceptance scenarios with stable IDs
+    template: spec.md
+    instruction: |
+      Define WHAT the system must do. Create one file per capability.
+      Every requirement heading MUST start with a stable acceptance ID:
+      `### Requirement: AC-001 <short name>`.
+      IDs are unique across the change and never renumbered after implementation begins.
+      Use SHALL/MUST and at least one `#### Scenario:` with WHEN/THEN per requirement.
+      Use ADDED, MODIFIED, REMOVED, or RENAMED delta sections correctly.
+    requires: [proposal]
+
+  - id: design
+    generates: design.md
+    description: Technical design and decision rationale
+    template: design.md
+    instruction: |
+      Explain HOW the change will be implemented. Include repository orientation,
+      goals and non-goals, decisions with alternatives and rationale, affected files
+      and interfaces, risks, rollback/recovery, and open questions. Link decisions to
+      acceptance IDs where useful. Do not duplicate requirement wording.
+    requires: [proposal, specs]
+
+  - id: tasks
+    generates: tasks.md
+    description: Small independently verifiable implementation tasks
+    template: tasks.md
+    instruction: |
+      Break the work into ordered checkbox tasks. Every implementation or verification
+      task MUST map to one or more acceptance IDs using `[AC-001]`. Use stable task IDs
+      and exact repository paths. Keep each task small enough for one focused context.
+      Include explicit verification and documentation/checkpoint tasks.
+    requires: [specs, design]
+
+  - id: handoff
+    generates: HANDOFF.md
+    description: Compact, overwrite-in-place resume snapshot
+    template: handoff.md
+    instruction: |
+      Create a one-page resume snapshot. Record the last checkpoint, branch and HEAD,
+      verified progress, current focus, exact next action, blockers, relevant files,
+      recent decisions/discoveries, and working-tree state. This is a current snapshot,
+      not an append-only diary and not a chat transcript.
+    requires: [tasks]
+
+  - id: verification
+    generates: verification.md
+    description: Evidence ledger for every acceptance criterion
+    template: verification.md
+    instruction: |
+      Create exactly one ledger row for every AC ID in the change specs. Start every
+      criterion as `unverified`. Allowed states are unverified, passed, failed, blocked,
+      and deferred. A criterion may become passed only with concrete evidence such as
+      a test command and result, test path, observed behavior, diagnostic, or commit.
+    requires: [specs, tasks]
+
+apply:
+  requires: [tasks, handoff, verification]
+  tracks: tasks.md
+  instruction: |
+    Work in independently verifiable slices. Before coding, read proposal, specs,
+    design, tasks, HANDOFF, and verification. Select the next unblocked task.
+    After each slice: run verification, record evidence, mark only completed tasks,
+    update HANDOFF with the exact next action, and then continue. Never equate code
+    written with verified acceptance. Pause on ambiguity, failed checks, or blockers.

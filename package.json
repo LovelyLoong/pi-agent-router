@@ -1,0 +1,83 @@
+{
+  "name": "pi-agent-router",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Configurable dynamic Agent routing, bounded execution, health, and audit infrastructure for Pi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LovelyLoong/pi-agent-router.git"
+  },
+  "homepage": "https://github.com/LovelyLoong/pi-agent-router#readme",
+  "bugs": {
+    "url": "https://github.com/LovelyLoong/pi-agent-router/issues"
+  },
+  "engines": {
+    "node": ">=24 <26"
+  },
+  "keywords": [
+    "pi-package",
+    "agent-router",
+    "model-routing",
+    "coding-agent"
+  ],
+  "files": [
+    "extensions",
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config/index.ts",
+    "./contracts": "./src/contracts/index.ts",
+    "./execution": "./src/execution/index.ts",
+    "./health": "./src/health/index.ts",
+    "./observability": "./src/observability/index.ts",
+    "./routing": "./src/routing/index.ts",
+    "./runtime": "./src/runtime/index.ts",
+    "./service": "./src/service/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "piAgentRouter": {
+    "serviceId": "pi-agent-router",
+    "serviceContractVersion": 1,
+    "discoveryTopic": "pi-agent-router.service.discover.v1",
+    "configuration": "~/.pi/agent/agent-router.json",
+    "admissionAuthority": "explicit-config-only",
+    "missingConfiguration": "fail-closed",
+    "setupCommand": "/agent-router setup",
+    "doctorCommand": "/agent-router doctor"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": ">=0.80.6",
+    "@earendil-works/pi-ai": ">=0.80.6",
+    "@earendil-works/pi-coding-agent": ">=0.80.6",
+    "@earendil-works/pi-tui": ">=0.80.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
+    "@earendil-works/pi-agent-core": "0.80.6",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}
