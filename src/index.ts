@@ -6,3 +6,5 @@ export * from "./observability/index.js";
 export * from "./routing/index.js";
 export * from "./runtime/index.js";
 export * from "./service/index.js";
+export * from "./supervisor/index.js";
+export * from "./worker/index.js";

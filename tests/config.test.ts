@@ -78,7 +78,9 @@ describe("Agent Router configuration", () => {
       expect.arrayContaining(["candidate_id_duplicate", "candidate_priority_duplicate"]),
     );
   });
+});
 
+describe("Agent Router V1 configuration files", () => {
   it("fails closed when the config file is missing", async () => {
     const directory = await temporaryDirectory();
     const path = join(directory, "agent-router.json");

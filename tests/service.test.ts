@@ -7,11 +7,16 @@ import { createStarterRouterConfig } from "../src/config/index.js";
 import type { RuntimeExecutionOptions, RuntimeExecutionResult } from "../src/runtime/index.js";
 import {
   AGENT_ROUTER_DISCOVERY_TOPIC,
+  AGENT_ROUTER_DISCOVERY_TOPIC_V2,
+  type AgentRouterConfigurationStateV2,
   type AgentRouterServiceDiscoveryError,
   type AgentRouterServiceEventBus,
+  type AgentRouterServiceV2,
   discoverAgentRouterService,
+  discoverAgentRouterServiceV2,
   registerAgentRouterService,
   requireConfiguredAgentRouterService,
+  requireConfiguredAgentRouterServiceV2,
 } from "../src/service/index.js";
 
 class TestEventBus implements AgentRouterServiceEventBus {
@@ -68,6 +73,62 @@ function executionResult(): RuntimeExecutionResult<{ answer: string }> {
 }
 
 const discoveryOptions = { timeoutMs: 10, settleMs: 1 };
+
+function v2Service(state: AgentRouterConfigurationStateV2 = "configured"): AgentRouterServiceV2 {
+  return {
+    contractVersion: 2,
+    serviceId: "pi-agent-router",
+    packageVersion: "0.1.0",
+    instanceId: "router-v2",
+    capabilities: [
+      "inspect-config-v2",
+      "run-agent-job",
+      "stream-agent-job",
+      "with-agent-job",
+      "inspect-agent-jobs",
+      "cancel-agent-job",
+      "drain-supervisor",
+    ],
+    async inspectConfiguration() {
+      return {
+        state,
+        path: "C:/agent/agent-router.json",
+        admissionAuthority: "explicit-config-only" as const,
+        setupCommand: "/agent-router setup" as const,
+        doctorCommand: "/agent-router doctor" as const,
+        migrationCommand: "/agent-router migrate-v2" as const,
+        diagnostics:
+          state === "configured"
+            ? []
+            : [
+                {
+                  code: "config_migration_required",
+                  severity: "error" as const,
+                  message: "V1 configuration requires explicit migration.",
+                },
+              ],
+      };
+    },
+    async inspectSupervisor() {
+      return {
+        state: "accepting" as const,
+        queuedJobs: 0,
+        activeFullAgentJobs: 0,
+        activeCompletionJobs: 0,
+        activeControlPlaneJobs: 0,
+        activeOwners: 0,
+        quarantinedCleanupItems: 0,
+        degradedReasons: [],
+      };
+    },
+    runJob: vi.fn(),
+    streamJob: vi.fn(),
+    withAgent: vi.fn(),
+    inspectJobs: vi.fn(),
+    cancelJob: vi.fn(),
+    drain: vi.fn(),
+  };
+}
 
 describe("mandatory Agent Router service", () => {
   it("discovers exactly one configured host and exposes non-authoritative starter metadata", async () => {
@@ -179,6 +240,38 @@ describe("mandatory Agent Router service", () => {
       expect.objectContaining({ cwd: "C:/repo", configPath: expect.any(String) }),
     );
     expect(observedExecutions).toEqual([execution]);
+  });
+
+  it("discovers V2 independently and reports V1 or migration-required compatibility", async () => {
+    const configuredEvents = new TestEventBus();
+    configuredEvents.on(AGENT_ROUTER_DISCOVERY_TOPIC_V2, (value) => {
+      const request = value as { respond(value: unknown): void };
+      request.respond(v2Service());
+    });
+    await expect(
+      requireConfiguredAgentRouterServiceV2(configuredEvents, discoveryOptions),
+    ).resolves.toMatchObject({ contractVersion: 2, instanceId: "router-v2" });
+
+    const v1Events = new TestEventBus();
+    v1Events.on(AGENT_ROUTER_DISCOVERY_TOPIC_V2, (value) => {
+      const request = value as { respond(value: unknown): void };
+      request.respond({ serviceId: "pi-agent-router", contractVersion: 1 });
+    });
+    await expect(discoverAgentRouterServiceV2(v1Events, discoveryOptions)).rejects.toMatchObject({
+      code: "service-incompatible",
+    });
+
+    const migrationEvents = new TestEventBus();
+    migrationEvents.on(AGENT_ROUTER_DISCOVERY_TOPIC_V2, (value) => {
+      const request = value as { respond(value: unknown): void };
+      request.respond(v2Service("migration-required"));
+    });
+    await expect(
+      requireConfiguredAgentRouterServiceV2(migrationEvents, discoveryOptions),
+    ).rejects.toMatchObject({
+      code: "service-config-invalid",
+      message: expect.stringContaining("/agent-router migrate-v2"),
+    });
   });
 
   it("propagates discovery cancellation without executing", async () => {
