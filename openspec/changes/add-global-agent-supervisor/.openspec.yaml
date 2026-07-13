@@ -1,0 +1,6 @@
+schema: pi-repo-workflow
+created: 2026-07-13
+goal: Make pi-agent-router the fail-closed global entry point and lifecycle
+  supervisor for every plugin-dispatched Pi Agent, subagent, and auxiliary LLM
+  job, with fresh isolated workers, structured ownership, deterministic cleanup,
+  compliance admission, and migrated controlled callers.

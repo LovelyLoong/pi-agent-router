@@ -37,7 +37,9 @@
     "./observability": "./src/observability/index.ts",
     "./routing": "./src/routing/index.ts",
     "./runtime": "./src/runtime/index.ts",
-    "./service": "./src/service/index.ts"
+    "./service": "./src/service/index.ts",
+    "./supervisor": "./src/supervisor/index.ts",
+    "./worker": "./src/worker/index.ts"
   },
   "pi": {
     "extensions": [

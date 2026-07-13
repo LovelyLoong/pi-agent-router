@@ -1,4 +1,10 @@
-import type { AgentRouterConfig, CandidateConfig } from "./schema.js";
+import type {
+  AgentRouterConfig,
+  AgentRouterConfigV2,
+  CandidateConfig,
+  ComplianceConfig,
+  SupervisorConfig,
+} from "./schema.js";
 
 type SharedCandidateFields = Pick<
   CandidateConfig,
@@ -11,6 +17,73 @@ type SharedCandidateFields = Pick<
   | "allowedSideEffects"
   | "allowedDataSensitivity"
 >;
+
+export function createStarterSupervisorConfig(): SupervisorConfig {
+  return {
+    limits: {
+      maxFullAgentWorkers: 4,
+      maxCompletionWorkers: 8,
+      maxJobsPerOwner: 3,
+      maxControlPlaneJobs: 2,
+      queueCapacity: 32,
+      providerLimits: [{ provider: "openai-codex", maxActive: 4 }],
+    },
+    priorityOrder: ["interactive", "maintenance", "background"],
+    deadlines: {
+      cooperativeAbortGraceMs: 5_000,
+      processExitGraceMs: 5_000,
+      cleanupDeadlineMs: 30_000,
+      drainDeadlineMs: 60_000,
+    },
+    ipc: {
+      protocolVersion: 1,
+      maxFrameBytes: 4_194_304,
+      maxRunPayloadBytes: 3_145_728,
+      maxToolArgumentBytes: 262_144,
+      maxToolResultBytes: 1_048_576,
+      maxPendingToolCalls: 16,
+      maxToolCalls: 128,
+    },
+    cleanup: {
+      deleteMaxAttempts: 5,
+      deleteBackoffMs: 250,
+      janitorMaxItems: 256,
+      quarantineTtlMs: 86_400_000,
+    },
+    retention: {
+      defaultMode: "ephemeral",
+      maxDebugTtlMs: 86_400_000,
+    },
+    ownership: {
+      serviceTransferTaskKinds: ["session-indexing", "memory-review"],
+      maxServiceOwnershipTtlMs: 3_600_000,
+      maxTransferredAttempts: 3,
+    },
+    dependencies: {
+      failureContinueTaskKinds: [],
+    },
+    isolation: {
+      fullAgent: "process",
+      completion: "process",
+      controlPlane: "process",
+    },
+  };
+}
+
+export function createStarterComplianceConfig(): ComplianceConfig {
+  return {
+    ruleVersion: 1,
+    attestationPath: "agent-router-admission.json",
+    maxSourceFiles: 20_000,
+    maxSourceBytes: 100_000_000,
+    allowedExternalProviderExemptions: [
+      "provider-search",
+      "provider-video",
+      "provider-url-context",
+      "provider-extraction",
+    ],
+  };
+}
 
 export function createStarterRouterConfig(): AgentRouterConfig {
   const common: SharedCandidateFields = {
@@ -125,5 +198,15 @@ export function createStarterRouterConfig(): AgentRouterConfig {
       probeTimeoutMs: 30_000,
       overallTimeoutMs: 180_000,
     },
+  };
+}
+
+export function createStarterRouterConfigV2(): AgentRouterConfigV2 {
+  const { configVersion: _configVersion, ...shared } = createStarterRouterConfig();
+  return {
+    configVersion: 2,
+    ...shared,
+    supervisor: createStarterSupervisorConfig(),
+    compliance: createStarterComplianceConfig(),
   };
 }
