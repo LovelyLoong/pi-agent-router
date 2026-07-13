@@ -1,4 +1,4 @@
-<!-- checkpoint-id: f9a64e55-6435-443c-93ad-37a5371a2cf4 -->
+<!-- checkpoint-id: 33ce6cbf-a1f8-4fd8-bc5a-fbc0a8096aa9 -->
 # Verification Ledger
 
 Allowed statuses: `unverified`, `passed`, `failed`, `blocked`, `deferred`.
@@ -27,7 +27,7 @@ Only `passed` counts as complete. Every `passed` row requires concrete evidence.
 | AC-019 | passed | Focused tests reject missing, duplicate, incompatible, malformed, missing-config, invalid-config, and cancelled discovery without foreground or in-memory-default fallback. | 2026-07-13T03:02:51.921Z |
 | AC-020 | passed | Production pi-sessions routed-agent requires the configured service handle, contains no direct AgentRouterRuntime construction, and service-backed privacy/cancellation/actual fallback plus full 163 regressions pass. | 2026-07-13T03:02:51.921Z |
 | AC-021 | passed | Real config deep-equals createStarterRouterConfig and admits no max; atomic settings replacement preserved unrelated data/filters; fresh Pi loaded local Router and local pi-sessions, independent verifier found one configured v1 provider plus session_ask, static Doctor passed without active probes, and timestamped backup/npm 0.8.0 rollback remain. | 2026-07-13T03:33:19.758Z |
-| AC-022 | unverified | — | — |
+| AC-022 | passed | LovelyLoong/pi-agent-router main 02097e9 and CI 29223981073 pass; latest public sibling clones pass Router 9/56 and fork 27/163 with zero audits; disposable no-max setup and independent offline verifier observe one configured Router service plus session_ask with zero stderr/extension errors and no paid/npm release activity. | 2026-07-13T04:42:49.315Z |
 
 ## Verification Notes
 
@@ -60,6 +60,12 @@ Only `passed` counts as complete. Every `passed` row requires concrete evidence.
 
 - 2026-07-13T03:30:46.947Z: T015/AC-021 activation evidence — Explicit setup materialized the reviewed starter; the corrected Windows `r+` fsync path atomically replaced package selection while preserving unrelated settings/filter/backup; fresh real-settings Pi loaded one configured Router service and local `session_ask`; static Doctor passed without active probes. Existing foreground processes require restart/reload, and paid manual answer acceptance remains separate.
 
+- 2026-07-13T04:37:25.881Z: T016/T017/AC-022 publication evidence — Public GitHub source, SHA-pinned Node 24 CI, LF checkout policy, clean sibling clone installation/checks, explicit no-max setup, and offline exactly-one-service/`session_ask` registration pass. GitHub OAuth required an explicit `workflow` scope refresh; no npm release, tag, active Doctor, or paid routed request occurred.
+
+- 2026-07-13T04:41:19.105Z: Final governance evidence — An explicit coordinator maintenance Pi process reported `coordination: coordinator`, `Workflow doctor: healthy.`, and `coordination: released` from the committed main worktree. T011/T012 can close; all 22 criteria and all implementation/review tasks have evidence.
+
 - 2026-07-13T03:33:19.758Z: checkpoint 3452e6dd-7ae3-4c01-a40a-377ba19b8080 — T015/AC-021 verified: explicit setup materialized the reviewed starter, corrected Windows r+ fsync enabled atomic package activation, and fresh Pi proved one configured Router service plus local session_ask with rollback preserved.
 
 - 2026-07-13T04:04:19.266Z: checkpoint f9a64e55-6435-443c-93ad-37a5371a2cf4 — T016/T1100 verified: Router is public-clone ready with LovelyLoong metadata, accurate Git-only sibling installation/activation docs, SHA-pinned Node 24 CI, clean diagnostics, 9/56 checks, zero audit, and strict OpenSpec.
+
+- 2026-07-13T04:42:49.315Z: checkpoint 33ce6cbf-a1f8-4fd8-bc5a-fbc0a8096aa9 — Public Router source publication is complete: all 22 criteria and T001-T017 pass; main 02097e9 is public with successful CI, clean sibling-clone install/check/audit and offline exactly-one configured service/session_ask verification; coordinator Workflow Doctor is healthy.

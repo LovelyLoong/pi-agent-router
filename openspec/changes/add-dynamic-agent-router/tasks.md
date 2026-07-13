@@ -25,8 +25,8 @@
 ## 4. Documentation, Verification, and Review
 
 - [x] T010 [AC-001] [AC-002] [AC-007] [AC-008] [AC-010] [AC-011] [AC-012] [AC-013] [AC-017] Document configuration, starter balanced model pool, task/executor/feedback APIs, privacy boundary, deadlines, cache/Doctor behavior, fallback semantics, package installation, pi-sessions fork maintenance, rollback, and future evaluator/CLI adapter seams.
-- [ ] T011 [AC-001] [AC-002] [AC-003] [AC-004] [AC-005] [AC-006] [AC-007] [AC-008] [AC-009] [AC-010] [AC-011] [AC-012] [AC-013] [AC-014] [AC-015] [AC-016] [AC-017] Run package typecheck/lint/tests/check, fork regressions, strict OpenSpec validation in both repositories, LSP/Lens diagnostics, npm audit, fresh-process package loading, manual Doctor, and disposable routed `session_ask`; record exact evidence in `verification.md`.
-- [ ] T012 [AC-001] [AC-002] [AC-003] [AC-004] [AC-005] [AC-006] [AC-007] [AC-008] [AC-009] [AC-010] [AC-011] [AC-012] [AC-013] [AC-014] [AC-015] [AC-016] [AC-017] Create the repository-tracked developer review packet with commitment-to-code/evidence mapping, reading order, repeatable acceptance steps, limitations, deferred evaluator/executor scope, publication state, and explicit accept/change/reject request; checkpoint both handoffs as review-ready.
+- [x] T011 [AC-001] [AC-002] [AC-003] [AC-004] [AC-005] [AC-006] [AC-007] [AC-008] [AC-009] [AC-010] [AC-011] [AC-012] [AC-013] [AC-014] [AC-015] [AC-016] [AC-017] Run package typecheck/lint/tests/check, fork regressions, strict OpenSpec validation in both repositories, LSP/Lens diagnostics, npm audit, fresh-process package loading, manual Doctor, and disposable routed `session_ask`; record exact evidence in `verification.md`.
+- [x] T012 [AC-001] [AC-002] [AC-003] [AC-004] [AC-005] [AC-006] [AC-007] [AC-008] [AC-009] [AC-010] [AC-011] [AC-012] [AC-013] [AC-014] [AC-015] [AC-016] [AC-017] Create the repository-tracked developer review packet with commitment-to-code/evidence mapping, reading order, repeatable acceptance steps, limitations, deferred evaluator/executor scope, publication state, and explicit accept/change/reject request; checkpoint both handoffs as review-ready.
 
 ## 5. Mandatory Router Service and Local Activation
 
@@ -34,7 +34,7 @@
 - [x] T014 [AC-020] Migrate routed `pi-sessions` production execution to the mandatory Router service, remove direct runtime construction from the managed path, and preserve injected test seams plus privacy/fallback/cancellation behavior.
 - [x] T015 [AC-021] Explicitly materialize the reviewed real starter configuration, atomically back up and replace the npm pi-sessions settings entry with the local Router and modified pi-sessions packages, run real/disposable package RPC and service E2E, and preserve rollback without touching installed npm files.
 - [x] T016 [AC-022] Add public repository/package metadata, Node 24 CI, Git sibling clone/install guidance, accurate activated-state/review documentation, and a Git-only/no-npm publication boundary.
-- [ ] T017 [AC-022] Configure repository-local author identity, establish `main`, create and push public `LovelyLoong/pi-agent-router`, then verify fresh public sibling clones with `npm ci`, full checks, and disposable offline Pi exactly-one-service/`session_ask` registration.
+- [x] T017 [AC-022] Configure repository-local author identity, establish `main`, create and push public `LovelyLoong/pi-agent-router`, then verify fresh public sibling clones with `npm ci`, full checks, and disposable offline Pi exactly-one-service/`session_ask` registration.
 
 ## Dependencies and Checkpoints
 
