@@ -1,20 +1,13 @@
 # Agent Guide
 
-<!-- pi-repo-workflow:start -->
-## Repository Workflow
+## Supervisor Single-Agent Continuation
 
-The developer's natural-language request is the normal interface. Before product mutation:
+The developer explicitly selected a sequential single-Agent continuation for the global Supervisor work.
 
-1. Restore state with `workflow_status` when needed; do not ask for facts already stored.
-2. Before choosing a tier or implementation, iteratively discover the real pain point, core value, intended experience, material decisions, and success signals. Ask one focused material question per round and let each answer reshape the next.
-3. Present a shared-understanding synthesis and obtain explicit confirmation, correction, or delegation; then call `workflow_prepare`. Runtime, not file count, enforces the minimum governance floor.
-4. Separate desired outcome from proposed approach and test blocking technical assumptions.
-5. Treat Quick/Standard/Heavy as minimum governance and persistence presets, not fixed solution strategies; preserve safe alternative exploration.
-6. Never guess between multiple durable Changes or initialize OpenSpec without explicit consent.
-7. Execute one bounded hypothesis at a time; branch or replan when evidence disagrees, stop at budget, and record only outcome-proven replacements as durable Pivots.
-8. Finish Quick work with `workflow_complete`; checkpoint each verified Standard/Heavy slice with `workflow_checkpoint`, then continue to the next dependency-ready task unless an explicit stop predicate applies. A checkpoint alone never ends the run.
-9. Before presenting Standard/Heavy work as complete, create a repository-tracked human review packet and mark it review-ready until the developer explicitly accepts it.
-10. Treat only evidence-backed `passed` criteria as verified; verification is not human acceptance. Do not store raw chat, secrets, large logs, or hidden reasoning, and do not alter Git history or branches without explicit authorization.
-
-Use slash commands only as manual recovery or diagnostic entry points.
-<!-- pi-repo-workflow:end -->
+1. Use `SUPERVISOR-WORK-LEDGER.md` as the operational source of truth for facts, completed work, remaining tasks, evidence, and the next exact action.
+2. Work only in the current continuation branch and worktree. Do not create additional worktrees, leases, claims, workflow candidates, or integration batches.
+3. Execute one task at a time in dependency order, beginning with T107. Keep hypotheses bounded and stop when evidence contradicts the approach.
+4. Preserve `openspec/changes/add-global-agent-supervisor/` and its HANDOFF/verification files as read-only historical evidence unless the developer explicitly re-enables that workflow.
+5. Run focused diagnostics and tests after each independently verifiable slice, then update the ledger with concrete evidence.
+6. Local commits are allowed after verification. Merge, push, paid smoke tests, publication, remote mutation, force operations, broad deletion, and history rewriting remain prohibited without separate developer authorization.
+7. Never report automated verification as human acceptance.

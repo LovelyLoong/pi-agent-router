@@ -1,0 +1,9 @@
+{
+  "packages": [
+    {
+      "source": "../../../packages/pi-repo-workflow",
+      "extensions": [],
+      "skills": []
+    }
+  ]
+}
