@@ -48,12 +48,13 @@
   },
   "piAgentRouter": {
     "serviceId": "pi-agent-router",
-    "serviceContractVersion": 1,
-    "discoveryTopic": "pi-agent-router.service.discover.v1",
+    "serviceContractVersion": 2,
+    "discoveryTopic": "pi-agent-router.service.discover.v2",
     "configuration": "~/.pi/agent/agent-router.json",
     "admissionAuthority": "explicit-config-only",
     "missingConfiguration": "fail-closed",
     "setupCommand": "/agent-router setup",
+    "migrationCommand": "/agent-router migrate-v2",
     "doctorCommand": "/agent-router doctor"
   },
   "scripts": {

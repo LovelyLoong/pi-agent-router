@@ -7,6 +7,32 @@ import { jobDescriptor, resource } from "./helpers/supervisor-fixtures.js";
 const NOW = Date.parse("2026-07-13T11:00:00.000Z");
 
 describe("singleton Agent job registry core", () => {
+  it("finishes a routing failure without fabricating an attempt or lease", () => {
+    const supervisor = new AgentJobSupervisorCore({
+      config: createStarterSupervisorConfig(),
+      clock: new FakeSupervisorClock(NOW),
+    });
+    supervisor.registerJob({
+      descriptor: jobDescriptor({ jobId: "job:routing-failed", now: NOW }),
+    });
+
+    const routing = supervisor.getJob("job:routing-failed");
+    expect(routing).toMatchObject({ lifecycleState: "routing" });
+    expect(routing).not.toHaveProperty("attempt");
+    expect(routing).not.toHaveProperty("lease");
+    expect(supervisor.finishJobWithoutAttempt("job:routing-failed", "failed")).toMatchObject({
+      terminal: [{ jobId: "job:routing-failed", status: "failed" }],
+    });
+    const terminal = supervisor.getJob("job:routing-failed");
+    expect(terminal).toMatchObject({
+      lifecycleState: "released",
+      terminalStatus: "failed",
+    });
+    expect(terminal).not.toHaveProperty("attempt");
+    expect(terminal).not.toHaveProperty("lease");
+    expect(() => supervisor.stop()).not.toThrow();
+  });
+
   it("tracks concurrent plugin jobs with unique immutable job, attempt, and lease identities", () => {
     const config = createStarterSupervisorConfig();
     let id = 0;

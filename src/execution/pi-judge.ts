@@ -11,9 +11,9 @@ import {
 import { createLinkedDeadline, runWithDeadline } from "./deadline.js";
 import type { PiSdkExecutionPayload, PiSdkExecutor } from "./pi-sdk.js";
 
-const ROUTER_SYSTEM_PROMPT = `You are a route-selection judge. Rank only the supplied candidate ids and only one supplied thinking level per candidate. Balance quality, cost, and latency from the task contract. Do not execute the task. Call rank_routes exactly once; never invent a model, executor, candidate, or thinking level.`;
+export const ROUTER_SYSTEM_PROMPT = `You are a route-selection judge. Rank only the supplied candidate ids and only one supplied thinking level per candidate. Balance quality, cost, and latency from the task contract. Do not execute the task. Call rank_routes exactly once; never invent a model, executor, candidate, or thinking level.`;
 
-function routerTask(input: RouterJudgeInput): TaskContract {
+export function routerTask(input: RouterJudgeInput): TaskContract {
   return {
     contractVersion: 1,
     taskId: `route-judge:${input.task.taskId}`.slice(0, 100),

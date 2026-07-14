@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { createStarterSupervisorConfig } from "../src/config/index.js";
 import { AttemptCleanupManager, type AttemptCleanupOperations } from "../src/worker/cleanup.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
 
 function operations(overrides: Partial<AttemptCleanupOperations> = {}): AttemptCleanupOperations {
   return {
@@ -82,6 +94,23 @@ describe("attempt cleanup manager", () => {
     janitorMayRemove = true;
     await expect(manager.runJanitor()).resolves.toEqual({ attempted: 1, removed: 1, remaining: 0 });
     expect(manager.status()).toEqual({ degraded: false, quarantineCount: 0, reasons: [] });
+  });
+
+  it("discovers only bounded Router-owned startup quarantine entries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-agent-router-cleanup-startup-"));
+    temporaryDirectories.push(root);
+    const quarantine = join(root, ".pi-agent-router-quarantine");
+    const owned = join(quarantine, randomUUID());
+    const unrelated = join(quarantine, "not-a-router-quarantine-entry");
+    await mkdir(owned, { recursive: true });
+    await mkdir(unrelated, { recursive: true });
+    const manager = new AttemptCleanupManager(createStarterSupervisorConfig().cleanup);
+
+    await expect(manager.discoverQuarantine(root)).resolves.toBe(1);
+    expect(manager.status()).toMatchObject({ degraded: true, quarantineCount: 1 });
+    await expect(manager.runJanitor()).resolves.toEqual({ attempted: 1, removed: 1, remaining: 0 });
+    await expect(stat(owned)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(unrelated)).resolves.toBeDefined();
   });
 
   it("retains an unconfirmed-process root for janitor without attempting unsafe deletion", async () => {

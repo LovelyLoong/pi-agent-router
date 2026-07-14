@@ -123,3 +123,8 @@ export interface AgentJobSupervisorCoreOptions {
 export interface CompleteJobOptions {
   status: AgentJobTerminalStatus;
 }
+
+export type WithoutAttemptTerminalStatus = Exclude<
+  AgentJobTerminalStatus,
+  "succeeded" | "cleanup_failed"
+>;

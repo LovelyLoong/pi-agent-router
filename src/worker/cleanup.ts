@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import type { SupervisorConfig } from "../config/schema.js";
 import type { AgentJobRetention } from "../contracts/jobs.js";
 
@@ -25,6 +25,9 @@ interface QuarantineEntry {
   addedAt: number;
   reason: string;
 }
+
+const QUARANTINE_ENTRY_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const defaultOperations: AttemptCleanupOperations = {
   remove: (path) => rm(path, { recursive: true, force: true }),
@@ -139,6 +142,34 @@ export class AttemptCleanupManager {
       pathHash,
       reason,
     };
+  }
+
+  async discoverQuarantine(parentRoot: string): Promise<number> {
+    const quarantineRoot = resolve(parentRoot, this.#quarantineRootName);
+    let entries: string[];
+    try {
+      entries = await readdir(quarantineRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+      throw error;
+    }
+    let discovered = 0;
+    for (const name of entries.sort().slice(0, this.#config.janitorMaxItems)) {
+      if (!QUARANTINE_ENTRY_PATTERN.test(name)) continue;
+      const path = resolve(quarantineRoot, name);
+      if (dirname(path) !== quarantineRoot) continue;
+      const pathHash = hashPath(path);
+      if (this.#quarantine.has(pathHash)) continue;
+      this.#quarantine.set(pathHash, {
+        path,
+        pathHash,
+        addedAt: Date.now(),
+        reason: "recovered-router-quarantine",
+      });
+      this.#degradedReasons.add(`cleanup:${pathHash}:recovered-router-quarantine`);
+      discovered += 1;
+    }
+    return discovered;
   }
 
   async runJanitor(): Promise<{ attempted: number; removed: number; remaining: number }> {

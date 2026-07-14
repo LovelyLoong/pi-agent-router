@@ -12,6 +12,7 @@ import {
   type AgentRouterServiceDiscoveryError,
   type AgentRouterServiceEventBus,
   type AgentRouterServiceV2,
+  bindAgentRouterOwnerLifecycleV2,
   discoverAgentRouterService,
   discoverAgentRouterServiceV2,
   registerAgentRouterService,
@@ -86,7 +87,12 @@ function v2Service(state: AgentRouterConfigurationStateV2 = "configured"): Agent
       "stream-agent-job",
       "with-agent-job",
       "inspect-agent-jobs",
+      "inspect-agent-tree",
+      "inspect-agent-audit",
       "cancel-agent-job",
+      "release-agent-owner",
+      "run-agent-janitor",
+      "doctor-supervisor",
       "drain-supervisor",
     ],
     async inspectConfiguration() {
@@ -125,7 +131,12 @@ function v2Service(state: AgentRouterConfigurationStateV2 = "configured"): Agent
     streamJob: vi.fn(),
     withAgent: vi.fn(),
     inspectJobs: vi.fn(),
+    inspectJobTree: vi.fn(),
+    inspectAudit: vi.fn(),
     cancelJob: vi.fn(),
+    releaseOwner: vi.fn(async () => 0),
+    runJanitor: vi.fn(),
+    doctor: vi.fn(),
     drain: vi.fn(),
   };
 }
@@ -272,6 +283,20 @@ describe("mandatory Agent Router service", () => {
       code: "service-config-invalid",
       message: expect.stringContaining("/agent-router migrate-v2"),
     });
+  });
+
+  it("binds session or connection abort to one idempotent owner release", async () => {
+    const service = v2Service();
+    const controller = new AbortController();
+    const binding = bindAgentRouterOwnerLifecycleV2(service, "session:one", controller.signal);
+
+    controller.abort("connection-closed");
+    await expect(binding.release()).resolves.toBe(0);
+    await binding.release();
+
+    expect(service.releaseOwner).toHaveBeenCalledTimes(1);
+    expect(service.releaseOwner).toHaveBeenCalledWith("session:one");
+    binding.dispose();
   });
 
   it("propagates discovery cancellation without executing", async () => {

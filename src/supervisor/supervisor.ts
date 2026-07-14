@@ -22,6 +22,7 @@ import type {
   SupervisorCancellationRequest,
   SupervisorClock,
   SupervisorMutationResult,
+  WithoutAttemptTerminalStatus,
 } from "./contracts.js";
 import { SupervisorAdmissionError } from "./contracts.js";
 import { assertValidRegistrationBatch } from "./graph.js";
@@ -192,6 +193,27 @@ export class AgentJobSupervisorCore {
     record.terminalStatus = options.status;
     record.blockingDependencyIds = [];
     result.terminal.push({ jobId, status: options.status });
+    this.#resolveReadiness(result);
+    this.#pump(result);
+    this.#rescheduleDeadlineTimer();
+    return result;
+  }
+
+  finishJobWithoutAttempt(
+    jobId: string,
+    status: WithoutAttemptTerminalStatus,
+  ): SupervisorMutationResult {
+    const result = this.#expireDeadlines();
+    const record = this.#requireJob(jobId);
+    if (record.terminalStatus) return result;
+    if (isActive(record) || record.attempt || record.lease) {
+      throw new SupervisorAdmissionError(
+        "job_state_invalid",
+        `Job '${jobId}' already owns an attempt and cannot finish without one.`,
+        jobId,
+      );
+    }
+    this.#finishWithoutAttempt(record, status, result);
     this.#resolveReadiness(result);
     this.#pump(result);
     this.#rescheduleDeadlineTimer();
@@ -430,6 +452,7 @@ export class AgentJobSupervisorCore {
   }
 
   #pump(result: SupervisorMutationResult): void {
+    if (this.#state !== "accepting") return;
     while (true) {
       const jobId = this.#queue.takeFirst((candidateId) => {
         const record = this.#jobs.get(candidateId);

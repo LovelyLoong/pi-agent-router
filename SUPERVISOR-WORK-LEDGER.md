@@ -51,7 +51,7 @@ Complete the Router-owned global Agent Supervisor so every full Agent, auxiliary
 
 ## Sequential remaining work
 
-- [ ] **T107 — Service ownership and operations (current):** make service V2 own one Supervisor; bind caller/session/connection cancellation; implement stop-admission, bounded drain, reload, and shutdown; complete redacted lifecycle/audit; expose jobs/job/tree/audit/janitor/Doctor commands, typed inspection API, and lightweight active/queued/degraded status.
+- [ ] **T107 — Service ownership and operations (current, implementation in progress):** make service V2 own one Supervisor; bind caller/session/connection cancellation; implement stop-admission, bounded drain, reload, and shutdown; complete redacted lifecycle/audit; expose jobs/job/tree/audit/janitor/Doctor commands, typed inspection API, and lightweight active/queued/degraded status.
 - [ ] **T108 — Compliance admission:** package/filter resolution, version/hash attestations, source rules, exemptions, activation gate, drift/degraded behavior, and remediation.
 - [ ] **T109 — pi-sessions migration:** move session ask, handoff, and auto-title to service V2 while preserving public contracts and private tools.
 - [ ] **T110 — Compaction/tree integration:** route Router-owned `session_before_compact` and `session_before_tree` work through supervised jobs.
@@ -76,12 +76,37 @@ T107 is complete only when all of the following are demonstrated:
 - Focused service lifecycle tests pass for success, failure, caller cancellation, session/connection teardown, reload, drain timeout, forced exit, cleanup failure, janitor recovery, and listener/timer disposal.
 - Full package checks remain green and a successful teardown leaves no new Worker process, attempt root, active job, timer, or listener.
 
+## T107 pushed handoff snapshot — 2026-07-14
+
+### Implemented in the current slice
+
+- Added a long-lived V2 host with one service-owned `AgentJobSupervisorCore`, `AgentWorkerClient`, cleanup manager, registry, and discovery lifetime.
+- Added supervised Router control-plane judgment and static fallback only after the failed judge Worker cleanup barrier.
+- Added run/stream/scoped Agent APIs, caller signal enforcement, session/connection owner-release binding, subtree cancellation, stop-admission, bounded drain, reload/shutdown ordering, and discovery preservation after drain timeout.
+- Added real Worker success, caller cancellation, forced Windows process-tree escalation, reload drain, cleanup-before-fallback, cleanup failure, startup/manual janitor, and recovery paths.
+- Added redacted terminal job audit/status topics, typed jobs/job/tree/audit/janitor/Doctor inspection, Pi commands, V2 setup/migration, and the lightweight active/queued/degraded indicator.
+- Updated package metadata to advertise service contract V2 while retaining V1 discovery compatibility during consumer migration.
+
+### Verification completed before the urgent push
+
+- `npm run lint` passed across 84 files.
+- `npx tsc --noEmit` passed.
+- The focused service/extension/cleanup test run passed 29 unaffected tests; its only failure was an incorrect new assertion about absent optional properties, which was corrected and then `tests/supervisor-registry.test.ts` passed 2/2.
+- Earlier focused T107 runs passed service lifecycle, real child Worker, extension, service discovery, cleanup, forced-exit, and drain suites.
+- No paid provider test, merge, publication, or `main` mutation was performed.
+
+### Still incomplete / must not be claimed done
+
+- Re-run the exact combined focused suite after checkout on the new machine, then run full `npm run check`, `npm audit --audit-level=high`, project LSP/Lens, `git diff --check`, and process/temp-root/listener/timer residue checks.
+- Review/refactor the new V2 orchestration hotspots reported by Lens (`AgentRouterServiceDomainV2`, V2 controller, and extension command handler); current findings are warnings, not verified blockers.
+- Reconcile any failed full-gate evidence, finish T107 coverage/evidence, and only then mark T107 complete. Do not begin T108 first.
+
 ## Known observations
 
 - A pre-fix Vitest 5-second parent timeout created separately identified sandbox-owned diagnostic residue before the final T106 run. Windows denied this session permission to terminate it. It is not evidence from the successful run and must not be targeted without exact ownership proof.
-- T106 Worker-layer behavior is verified, while full service/registry/audit integration remains T107/T114 work.
+- T106 Worker-layer behavior is verified. T107 now has a substantial pushed implementation but remains incomplete until the new-machine full gate, residue check, and complexity review pass.
 - The Router and repository-workflow packages remain separate; this continuation does not modify `pi-repo-workflow`.
 
 ## Next exact action
 
-Verify that a fresh Pi runtime in this checkout does not load `pi-repo-workflow`. Then inspect the current service V1/V2 ownership and lifecycle symbols, define the smallest T107 service slice, add focused failing tests, implement it, and record concrete evidence here before creating the next local commit.
+On the new machine, fetch and check out `work/add-global-agent-supervisor-continuation`, read `NEW-MACHINE-HANDOFF.md` and this ledger, verify a clean HEAD, rerun the listed focused/full gates, resolve findings, and complete T107 only.

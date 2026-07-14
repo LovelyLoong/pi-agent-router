@@ -14,13 +14,20 @@ export const AGENT_ROUTER_SERVICE_CONTRACT_VERSION_V2 = 2;
 export const AGENT_ROUTER_PACKAGE_VERSION = "0.1.0";
 export const AGENT_ROUTER_DISCOVERY_TOPIC = "pi-agent-router.service.discover.v1";
 export const AGENT_ROUTER_DISCOVERY_TOPIC_V2 = "pi-agent-router.service.discover.v2";
+export const AGENT_ROUTER_JOB_AUDIT_TOPIC_V2 = "pi-agent-router.job.audit.v2";
+export const AGENT_ROUTER_SUPERVISOR_STATUS_TOPIC_V2 = "pi-agent-router.supervisor.status.v2";
 export const AGENT_ROUTER_SERVICE_V2_CAPABILITIES = [
   "inspect-config-v2",
   "run-agent-job",
   "stream-agent-job",
   "with-agent-job",
   "inspect-agent-jobs",
+  "inspect-agent-tree",
+  "inspect-agent-audit",
   "cancel-agent-job",
+  "release-agent-owner",
+  "run-agent-janitor",
+  "doctor-supervisor",
   "drain-supervisor",
 ] as const;
 
@@ -148,12 +155,85 @@ export interface AgentRouterServiceCancelRequestV2 {
   reason: "caller-aborted" | "owner-ended" | "deadline" | "shutdown" | "operator";
 }
 
+export interface AgentRouterJobCleanupV2 {
+  ok: boolean;
+  attempts: number;
+  retained: boolean;
+  quarantined: boolean;
+  pathHash: string;
+}
+
+export type AgentRouterJobInspectionV2 = AgentJobInspectionV2 & {
+  cancellationReason?: AgentRouterServiceCancelRequestV2["reason"] | undefined;
+  processState?: "not-started" | "running" | "exited" | undefined;
+  cleanup?: AgentRouterJobCleanupV2 | undefined;
+};
+
+export interface AgentRouterJobTreeNodeV2 {
+  job: AgentRouterJobInspectionV2;
+  children: AgentRouterJobTreeNodeV2[];
+  dependencies: AgentRouterJobInspectionV2[];
+}
+
+export interface AgentRouterJobAuditQueryV2 {
+  jobId?: string | undefined;
+  ownerKind?: AgentJobInspectionV2["owner"]["kind"] | undefined;
+  limit?: number | undefined;
+}
+
+export interface AgentRouterJobAuditRecordV2 {
+  contractVersion: 2;
+  auditId: string;
+  jobId: string;
+  ownerKind: AgentJobInspectionV2["owner"]["kind"];
+  ownerIdHash: string;
+  jobClass: AgentJobInspectionV2["jobClass"];
+  dependencyIds: string[];
+  dependencyOutcomes: Array<{
+    jobId: string;
+    terminalStatus?: AgentJobResultV2["status"] | undefined;
+  }>;
+  submittedAt: string;
+  queuedAt?: string | undefined;
+  startedAt?: string | undefined;
+  finishedAt: string;
+  attemptId?: string | undefined;
+  candidateId?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: string | undefined;
+  terminalStatus: AgentJobResultV2["status"];
+  cancellationReason?: AgentRouterServiceCancelRequestV2["reason"] | undefined;
+  failureCode?: string | undefined;
+  processEscalated: boolean;
+  processExited: boolean;
+  cleanup: AgentRouterJobCleanupV2;
+  lifecycle: Array<{ type: AgentJobEventV2["type"] | string; at: string }>;
+}
+
+export interface AgentRouterJanitorResultV2 {
+  attempted: number;
+  reclaimed: number;
+  remaining: number;
+  degraded: boolean;
+}
+
+export interface AgentRouterSupervisorDoctorV2 {
+  ok: boolean;
+  inspectedAt: string;
+  supervisor: AgentRouterSupervisorStatusV2;
+  findings: Array<{
+    code: string;
+    severity: "info" | "warning" | "error";
+    message: string;
+  }>;
+}
+
 export interface AgentJobStreamV2<TResult = unknown>
   extends AsyncIterable<AgentJobEventV2<TResult>> {
   readonly jobId: string;
   result(): Promise<AgentJobResultV2<TResult>>;
   cancel(reason?: string): Promise<void>;
-  inspect(): Promise<AgentJobInspectionV2 | undefined>;
+  inspect(): Promise<AgentRouterJobInspectionV2 | undefined>;
 }
 
 export interface AgentRouterServiceV2 {
@@ -174,8 +254,13 @@ export interface AgentRouterServiceV2 {
     request: AgentRouterServiceJobRequestV2<TPayload>,
     consume: (job: AgentJobStreamV2<TResult>) => Promise<TConsumed>,
   ): Promise<TConsumed>;
-  inspectJobs(query?: AgentRouterServiceJobQueryV2): Promise<AgentJobInspectionV2[]>;
+  inspectJobs(query?: AgentRouterServiceJobQueryV2): Promise<AgentRouterJobInspectionV2[]>;
+  inspectJobTree(query?: AgentRouterServiceJobQueryV2): Promise<AgentRouterJobTreeNodeV2[]>;
+  inspectAudit(query?: AgentRouterJobAuditQueryV2): Promise<AgentRouterJobAuditRecordV2[]>;
   cancelJob(request: AgentRouterServiceCancelRequestV2): Promise<boolean>;
+  releaseOwner(ownerId: string): Promise<number>;
+  runJanitor(): Promise<AgentRouterJanitorResultV2>;
+  doctor(): Promise<AgentRouterSupervisorDoctorV2>;
   drain(reason: string): Promise<void>;
 }
 
@@ -207,7 +292,12 @@ const AGENT_ROUTER_SERVICE_V2_METHODS = [
   "streamJob",
   "withAgent",
   "inspectJobs",
+  "inspectJobTree",
+  "inspectAudit",
   "cancelJob",
+  "releaseOwner",
+  "runJanitor",
+  "doctor",
   "drain",
 ] as const;
 

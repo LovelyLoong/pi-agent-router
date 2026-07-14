@@ -258,3 +258,33 @@ export async function requireConfiguredAgentRouterServiceV2(
     configuration,
   );
 }
+
+export interface AgentRouterOwnerLifecycleBindingV2 {
+  release(): Promise<number>;
+  dispose(): void;
+}
+
+export function bindAgentRouterOwnerLifecycleV2(
+  service: AgentRouterServiceV2,
+  ownerId: string,
+  signal: AbortSignal,
+  options: { onError?: ((error: unknown) => void) | undefined } = {},
+): AgentRouterOwnerLifecycleBindingV2 {
+  if (!ownerId.trim()) throw new Error("Agent Router owner id must be non-empty.");
+  let releasePromise: Promise<number> | undefined;
+  const release = () => {
+    releasePromise ??= service.releaseOwner(ownerId);
+    return releasePromise;
+  };
+  const abort = () => {
+    void release().catch((error) => options.onError?.(error));
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  return {
+    release,
+    dispose() {
+      signal.removeEventListener("abort", abort);
+    },
+  };
+}
